@@ -1,9 +1,13 @@
 package simplejson
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log"
+	"strconv"
+
+	"github.com/larstos/convert"
 )
 
 // returns the current implementation version
@@ -24,6 +28,19 @@ func NewJson(body []byte) (*Json, error) {
 		return nil, err
 	}
 	return j, nil
+}
+
+func FromObject(m interface{}) *Json {
+	return &Json{
+		data: m,
+	}
+}
+
+//create json from existing map
+func From(m map[string]interface{}) *Json {
+	return &Json{
+		data: m,
+	}
 }
 
 // New returns a pointer to a new, empty `Json` object
@@ -50,7 +67,31 @@ func (j *Json) EncodePretty() ([]byte, error) {
 
 // Implements the json.Marshaler interface.
 func (j *Json) MarshalJSON() ([]byte, error) {
+	return marshalNoEscape(&j.data)
+}
+
+func (j *Json) MarshalJSONEscape() ([]byte, error) {
 	return json.Marshal(&j.data)
+}
+
+func (j *Json) MarshalJSONNoEscape() ([]byte, error) {
+	return marshalNoEscape(&j.data)
+}
+
+func marshalNoEscape(v interface{}) ([]byte, error) {
+	var bbuf bytes.Buffer
+	enc := json.NewEncoder(&bbuf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	bodyBts := bbuf.Bytes()
+	l := len(bodyBts)
+	if l > 0 && bodyBts[l-1] == '\n' {
+		return bodyBts[:l-1], nil
+	} else {
+		return bodyBts, nil
+	}
 }
 
 // Set modifies `Json` map by `key` and `value`
@@ -100,6 +141,27 @@ func (j *Json) SetPath(branch []string, val interface{}) {
 
 	// add remaining k/v
 	curr[branch[len(branch)-1]] = val
+}
+
+// SetIndex modifies `Json` array by index
+// Useful for changing the special index value in a `Json` object easily.
+func (j *Json) SetIndex(index int, val interface{}) {
+	a, err := j.Array()
+	if err == nil {
+		if len(a) > index {
+			a[index] = val
+		}
+	}
+	/*
+		change note suit php list as {"0":{...}}
+	*/
+	m, err := j.Map()
+	if err == nil && len(m) > index {
+		_, ok := tryToMapToArray(m)
+		if ok {
+			j.Set(strconv.Itoa(index), val)
+		}
+	}
 }
 
 // Del modifies `Json` map by deleting `key` if it is present.
@@ -253,8 +315,30 @@ func (j *Json) MustArray(args ...[]interface{}) []interface{} {
 	if err == nil {
 		return a
 	}
-
+	/*
+		change note suit php list as {"0":{...}}
+	*/
+	m, err := j.Map()
+	if err != nil {
+		return def
+	}
+	r, ok := tryToMapToArray(m)
+	if ok {
+		return r
+	}
 	return def
+}
+
+func tryToMapToArray(m map[string]interface{}) ([]interface{}, bool) {
+	ret := make([]interface{}, 0, len(m))
+	for i := 0; i < len(m); i++ {
+		key := strconv.Itoa(i)
+		if _, ok := m[key]; !ok {
+			return nil, false
+		}
+		ret = append(ret, m[key])
+	}
+	return ret, true
 }
 
 // MustMap guarantees the return of a `map[string]interface{}` (with optional default)
@@ -302,7 +386,7 @@ func (j *Json) MustString(args ...string) string {
 		return s
 	}
 
-	return def
+	return convert.MustString(j.Interface(), def)
 }
 
 // MustStringArray guarantees the return of a `[]string` (with optional default)
@@ -350,7 +434,7 @@ func (j *Json) MustInt(args ...int) int {
 		return i
 	}
 
-	return def
+	return int(convert.MustInt64(j.Interface(), int64(def)))
 }
 
 // MustFloat64 guarantees the return of a `float64` (with optional default)
@@ -373,7 +457,7 @@ func (j *Json) MustFloat64(args ...float64) float64 {
 		return f
 	}
 
-	return def
+	return convert.MustFloat64(j.Interface(), def)
 }
 
 // MustBool guarantees the return of a `bool` (with optional default)
@@ -396,7 +480,7 @@ func (j *Json) MustBool(args ...bool) bool {
 		return b
 	}
 
-	return def
+	return convert.MustBool(j.Interface(), def)
 }
 
 // MustInt64 guarantees the return of an `int64` (with optional default)
@@ -419,7 +503,7 @@ func (j *Json) MustInt64(args ...int64) int64 {
 		return i
 	}
 
-	return def
+	return convert.MustInt64(j.Interface(), def)
 }
 
 // MustUInt64 guarantees the return of an `uint64` (with optional default)
