@@ -213,6 +213,16 @@ func (j *Json) GetIndex(index int) *Json {
 			return &Json{a[index]}
 		}
 	}
+	/*
+		change note suit php list as {"0":{...}}
+	*/
+	m, err := j.Map()
+	if err == nil && len(m) > index {
+		_, ok := tryToMapToArray(m)
+		if ok {
+			return j.Get(strconv.Itoa(index))
+		}
+	}
 	return &Json{nil}
 }
 
